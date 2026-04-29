@@ -27,7 +27,7 @@ export const TaskModal = ({ task, onSave, onClose, projects, labels, teamMembers
         labels: task?.labels || [],
         assignedTo: task?.assignedTo || '',
         project: task?.project || 'inbox',
-        column: task?.column || 'todo',
+        column_id: task?.column_id || 'todo',
         completed: task?.completed || false,
         repeat: task?.repeat || '',
         id: task?.id || Date.now().toString()

@@ -1,6 +1,7 @@
 import * as ReactModule from 'react';
 const React = ReactModule.default || ReactModule;
 const { useState, useEffect, useCallback, useMemo } = React;
+import { supabase } from './lib/supabase';
 import Sidebar from './components/Sidebar';
 import KanbanBoard from './components/KanbanBoard';
 import { TaskModal, TaskDetailModal, ProjectModal, LabelModal, TeamModal, DeleteConfirmationModal } from './components/Modals';
@@ -28,32 +29,23 @@ const App = () => {
     const initialColumns = [];
 
     // --- State Management ---
-    const [tasks, setTasks] = useState(() => JSON.parse(localStorage.getItem('todoist_tasks')) || []);
-    const [projects, setProjects] = useState(() => JSON.parse(localStorage.getItem('todoist_projects')) || initialProjects);
-    const [labels, setLabels] = useState(() => JSON.parse(localStorage.getItem('todoist_labels')) || initialLabels);
-    const [teamMembers, setTeamMembers] = useState(() => JSON.parse(localStorage.getItem('todoist_team')) || initialTeamMembers);
-    const [subtasks, setSubtasks] = useState(() => JSON.parse(localStorage.getItem('todoist_subtasks')) || []);
-    const [comments, setComments] = useState(() => JSON.parse(localStorage.getItem('todoist_comments')) || []);
-    const [files, setFiles] = useState(() => JSON.parse(localStorage.getItem('todoist_files')) || []);
-    const [columns, setColumns] = useState(() => {
-        const resetKey = 'todoist_reset_v4';
-        const hasReset = localStorage.getItem(resetKey);
-        if (!hasReset) {
-            localStorage.removeItem('todoist_columns');
-            localStorage.setItem(resetKey, 'true');
-            return [];
-        }
-        const saved = localStorage.getItem('todoist_columns');
-        return saved ? JSON.parse(saved) : [];
-    });
+    const [tasks, setTasks] = useState([]);
+    const [projects, setProjects] = useState(initialProjects);
+    const [labels, setLabels] = useState(initialLabels);
+    const [teamMembers, setTeamMembers] = useState(initialTeamMembers);
+    const [subtasks, setSubtasks] = useState([]);
+    const [comments, setComments] = useState([]);
+    const [files, setFiles] = useState([]);
+    const [columns, setColumns] = useState([]);
+    const [loading, setLoading] = useState(true);
 
     // --- Repair Hidden Tasks ---
     useEffect(() => {
         const hasDoneCol = columns.some(c => c.id === 'done');
         if (!hasDoneCol && columns.length > 0) {
-            const hasTasksInDone = tasks.some(t => t.column === 'done');
+            const hasTasksInDone = tasks.some(t => t.column_id === 'done');
             if (hasTasksInDone) {
-                setTasks(prev => prev.map(t => t.column === 'done' ? { ...t, column: columns[0].id } : t));
+                setTasks(prev => prev.map(t => t.column_id === 'done' ? { ...t, column_id: columns[0].id } : t));
             }
         }
     }, []);
@@ -73,17 +65,46 @@ const App = () => {
         setNotification({ message, type });
     }, []);
 
-    // --- Persistence ---
+    // --- Supabase Data Fetching ---
+    const fetchData = useCallback(async () => {
+        try {
+            setLoading(true);
+            const [
+                { data: tasksData },
+                { data: projectsData },
+                { data: labelsData },
+                { data: teamData },
+                { data: columnsData },
+                { data: subtasksData },
+                { data: commentsData }
+            ] = await Promise.all([
+                supabase.from('tasks').select('*'),
+                supabase.from('projects').select('*'),
+                supabase.from('labels').select('*'),
+                supabase.from('team_members').select('*'),
+                supabase.from('columns').select('*').order('order_index'),
+                supabase.from('subtasks').select('*'),
+                supabase.from('comments').select('*')
+            ]);
+
+            if (tasksData) setTasks(tasksData);
+            if (projectsData && projectsData.length > 0) setProjects(projectsData);
+            if (labelsData) setLabels(labelsData);
+            if (teamData) setTeamMembers(teamData);
+            if (columnsData) setColumns(columnsData);
+            if (subtasksData) setSubtasks(subtasksData);
+            if (commentsData) setComments(commentsData);
+        } catch (error) {
+            console.error('Error fetching data:', error);
+            notify('Помилка завантаження даних', 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [notify]);
+
     useEffect(() => {
-        localStorage.setItem('todoist_tasks', JSON.stringify(tasks));
-        localStorage.setItem('todoist_projects', JSON.stringify(projects));
-        localStorage.setItem('todoist_labels', JSON.stringify(labels));
-        localStorage.setItem('todoist_team', JSON.stringify(teamMembers));
-        localStorage.setItem('todoist_subtasks', JSON.stringify(subtasks));
-        localStorage.setItem('todoist_comments', JSON.stringify(comments));
-        localStorage.setItem('todoist_files', JSON.stringify(files));
-        localStorage.setItem('todoist_columns', JSON.stringify(columns));
-    }, [tasks, projects, labels, teamMembers, subtasks, comments, files, columns]);
+        fetchData();
+    }, [fetchData]);
 
     // --- Desktop Notification Permission ---
     useEffect(() => {
@@ -138,62 +159,124 @@ const App = () => {
     // --- CRUD Handlers ---
 
     // Tasks
-    const handleTaskSave = useCallback((taskData) => {
-        setTasks(prev => {
-            const exists = prev.find(t => String(t.id) === String(taskData.id));
-            if (exists) {
-                notify('Задачу оновлено');
-                return prev.map(t => String(t.id) === String(taskData.id) ? taskData : t);
-            }
-            notify('Задачу створено');
-            return [...prev, taskData];
-        });
-        setActiveModal({ type: null, data: null });
+    const handleTaskSave = useCallback(async (taskData) => {
+        try {
+            const { error } = await supabase.from('tasks').upsert(taskData);
+            if (error) throw error;
+
+            setTasks(prev => {
+                const exists = prev.find(t => String(t.id) === String(taskData.id));
+                return exists ? prev.map(t => String(t.id) === String(taskData.id) ? taskData : t) : [...prev, taskData];
+            });
+            notify(taskData.id ? 'Задачу оновлено' : 'Задачу створено');
+            setActiveModal({ type: null, data: null });
+        } catch (error) {
+            console.error('Error saving task:', error);
+            notify('Помилка при збереженні задачі', 'error');
+        }
     }, [notify]);
 
-    const handleTaskDelete = useCallback((taskId) => {
-        const idStr = String(taskId);
-        setTasks(prev => prev.filter(t => String(t.id) !== idStr));
-        setSubtasks(prev => prev.filter(s => String(s.parentId) !== idStr));
-        setComments(prev => prev.filter(c => String(c.taskId) !== idStr));
-        setFiles(prev => prev.filter(f => String(f.taskId) !== idStr));
-        notify('Задачу видалено', 'warning');
-        setActiveModal({ type: null, data: null });
+    const handleTaskDelete = useCallback(async (taskId) => {
+        try {
+            const idStr = String(taskId);
+            const { error } = await supabase.from('tasks').delete().eq('id', idStr);
+            if (error) throw error;
+
+            setTasks(prev => prev.filter(t => String(t.id) !== idStr));
+            notify('Задачу видалено', 'warning');
+            setActiveModal({ type: null, data: null });
+        } catch (error) {
+            console.error('Error deleting task:', error);
+            notify('Помилка при видаленні задачі', 'error');
+        }
     }, [notify]);
 
-    const handleToggleComplete = useCallback((taskId) => {
-        const idStr = String(taskId);
-        setTasks(prev => prev.map(t => String(t.id) === idStr ? { ...t, completed: !t.completed } : t));
-    }, []);
+    const handleToggleComplete = useCallback(async (taskId) => {
+        try {
+            const idStr = String(taskId);
+            const task = tasks.find(t => String(t.id) === idStr);
+            if (!task) return;
 
-    const handleTaskMove = useCallback((taskId, newColumn) => {
-        const idStr = String(taskId);
-        setTasks(prev => prev.map(t => String(t.id) === idStr ? { ...t, column: newColumn, completed: newColumn === 'done' } : t));
+            const updatedTask = { ...task, completed: !task.completed };
+            const { error } = await supabase.from('tasks').update({ completed: updatedTask.completed }).eq('id', idStr);
+            if (error) throw error;
+
+            setTasks(prev => prev.map(t => String(t.id) === idStr ? updatedTask : t));
+        } catch (error) {
+            console.error('Error toggling task:', error);
+        }
+    }, [tasks]);
+
+    const handleTaskMove = useCallback(async (taskId, newColumn) => {
+        try {
+            const idStr = String(taskId);
+            const isDone = newColumn === 'done';
+            const { error } = await supabase.from('tasks').update({ column_id: newColumn, completed: isDone }).eq('id', idStr);
+            if (error) throw error;
+
+            setTasks(prev => prev.map(t => String(t.id) === idStr ? { ...t, column_id: newColumn, completed: isDone } : t));
+        } catch (error) {
+            console.error('Error moving task:', error);
+        }
     }, []);
 
     // Subtasks
-    const handleAddSubtask = useCallback((parentId, content) => {
-        setSubtasks(prev => [...prev, { id: Date.now().toString(), parentId, content, completed: false }]);
-        notify('Підзадачу додано');
+    const handleAddSubtask = useCallback(async (parentId, content) => {
+        try {
+            const newSubtask = { id: Date.now().toString(), parentId, content, completed: false };
+            const { error } = await supabase.from('subtasks').insert(newSubtask);
+            if (error) throw error;
+            setSubtasks(prev => [...prev, newSubtask]);
+            notify('Підзадачу додано');
+        } catch (error) {
+            console.error('Error adding subtask:', error);
+        }
     }, [notify]);
 
-    const handleToggleSubtask = useCallback((id) => {
-        setSubtasks(prev => prev.map(s => s.id === id ? { ...s, completed: !s.completed } : s));
-    }, []);
+    const handleToggleSubtask = useCallback(async (id) => {
+        try {
+            const subtask = subtasks.find(s => s.id === id);
+            if (!subtask) return;
+            const { error } = await supabase.from('subtasks').update({ completed: !subtask.completed }).eq('id', id);
+            if (error) throw error;
+            setSubtasks(prev => prev.map(s => s.id === id ? { ...s, completed: !s.completed } : s));
+        } catch (error) {
+            console.error('Error toggling subtask:', error);
+        }
+    }, [subtasks]);
 
-    const handleDeleteSubtask = useCallback((id) => {
-        setSubtasks(prev => prev.filter(s => s.id !== id));
-        notify('Підзадачу видалено', 'info');
+    const handleDeleteSubtask = useCallback(async (id) => {
+        try {
+            const { error } = await supabase.from('subtasks').delete().eq('id', id);
+            if (error) throw error;
+            setSubtasks(prev => prev.filter(s => s.id !== id));
+            notify('Підзадачу видалено', 'info');
+        } catch (error) {
+            console.error('Error deleting subtask:', error);
+        }
     }, [notify]);
 
     // Comments & Files
-    const handleAddComment = useCallback((taskId, content) => {
-        setComments(prev => [...prev, { id: Date.now().toString(), taskId, content, createdAt: Date.now() }]);
-        notify('Коментар додано');
+    const handleAddComment = useCallback(async (taskId, content) => {
+        try {
+            const newComment = { id: Date.now().toString(), taskId, content, createdAt: Date.now() };
+            const { error } = await supabase.from('comments').insert(newComment);
+            if (error) throw error;
+            setComments(prev => [...prev, newComment]);
+            notify('Коментар додано');
+        } catch (error) {
+            console.error('Error adding comment:', error);
+        }
     }, [notify]);
 
-    const handleDeleteComment = useCallback((id) => {
-        setComments(prev => prev.filter(c => c.id !== id));
+    const handleDeleteComment = useCallback(async (id) => {
+        try {
+            const { error } = await supabase.from('comments').delete().eq('id', id);
+            if (error) throw error;
+            setComments(prev => prev.filter(c => c.id !== id));
+        } catch (error) {
+            console.error('Error deleting comment:', error);
+        }
     }, []);
 
     const handleAddFile = useCallback((taskId, fileData) => {
@@ -206,64 +289,126 @@ const App = () => {
     }, []);
 
     // Projects, Labels, Team
-    const handleProjectSave = useCallback((data) => {
-        setProjects(prev => {
-            const exists = prev.find(p => p.id === data.id);
-            return exists ? prev.map(p => p.id === data.id ? data : p) : [...prev, data];
-        });
-        notify(data.id ? 'Проект оновлено' : 'Проект створено');
+    const handleProjectSave = useCallback(async (data) => {
+        try {
+            const { error } = await supabase.from('projects').upsert(data);
+            if (error) throw error;
+
+            setProjects(prev => {
+                const exists = prev.find(p => p.id === data.id);
+                return exists ? prev.map(p => p.id === data.id ? data : p) : [...prev, data];
+            });
+            notify(data.id ? 'Проект оновлено' : 'Проект створено');
+        } catch (error) {
+            console.error('Error saving project:', error);
+        }
     }, [notify]);
 
-    const handleProjectDelete = useCallback((id) => {
-        if (id === 'inbox') return;
-        setProjects(prev => prev.filter(p => p.id !== id));
-        setTasks(prev => prev.map(t => t.project === id ? { ...t, project: 'inbox' } : t));
-        notify('Проект видалено');
-        if (selectedProject === id) setSelectedProject('all');
+    const handleProjectDelete = useCallback(async (id) => {
+        try {
+            if (id === 'inbox') return;
+            const { error } = await supabase.from('projects').delete().eq('id', id);
+            if (error) throw error;
+
+            setProjects(prev => prev.filter(p => p.id !== id));
+            setTasks(prev => prev.map(t => t.project === id ? { ...t, project: 'inbox' } : t));
+            notify('Проект видалено');
+            if (selectedProject === id) setSelectedProject('all');
+        } catch (error) {
+            console.error('Error deleting project:', error);
+        }
     }, [selectedProject, notify]);
 
-    const handleLabelSave = useCallback((data) => {
-        setLabels(prev => prev.find(l => l.id === data.id) ? prev.map(l => l.id === data.id ? data : l) : [...prev, data]);
-        notify('Мітку збережено');
+    const handleLabelSave = useCallback(async (data) => {
+        try {
+            const { error } = await supabase.from('labels').upsert(data);
+            if (error) throw error;
+            setLabels(prev => prev.find(l => l.id === data.id) ? prev.map(l => l.id === data.id ? data : l) : [...prev, data]);
+            notify('Мітку збережено');
+        } catch (error) {
+            console.error('Error saving label:', error);
+        }
     }, [notify]);
 
-    const handleLabelDelete = useCallback((id) => {
-        setLabels(prev => prev.filter(l => l.id !== id));
-        setTasks(prev => prev.map(t => ({ ...t, labels: t.labels?.filter(lid => lid !== id) || [] })));
+    const handleLabelDelete = useCallback(async (id) => {
+        try {
+            const { error } = await supabase.from('labels').delete().eq('id', id);
+            if (error) throw error;
+            setLabels(prev => prev.filter(l => l.id !== id));
+            setTasks(prev => prev.map(t => ({ ...t, labels: t.labels?.filter(lid => lid !== id) || [] })));
+        } catch (error) {
+            console.error('Error deleting label:', error);
+        }
     }, []);
 
-    const handleTeamSave = useCallback((data) => {
-        setTeamMembers(prev => prev.find(m => m.id === data.id) ? prev.map(m => m.id === data.id ? data : m) : [...prev, data]);
-        notify('Учасника додано');
+    const handleTeamSave = useCallback(async (data) => {
+        try {
+            const { error } = await supabase.from('team_members').upsert(data);
+            if (error) throw error;
+            setTeamMembers(prev => prev.find(m => m.id === data.id) ? prev.map(m => m.id === data.id ? data : m) : [...prev, data]);
+            notify('Учасника додано');
+        } catch (error) {
+            console.error('Error saving team member:', error);
+        }
     }, [notify]);
 
-    const handleTeamDelete = useCallback((id) => {
-        setTeamMembers(prev => prev.filter(m => m.id !== id));
-        setTasks(prev => prev.map(t => t.assignedTo === id ? { ...t, assignedTo: '' } : t));
+    const handleTeamDelete = useCallback(async (id) => {
+        try {
+            const { error } = await supabase.from('team_members').delete().eq('id', id);
+            if (error) throw error;
+            setTeamMembers(prev => prev.filter(m => m.id !== id));
+            setTasks(prev => prev.map(t => t.assignedTo === id ? { ...t, assignedTo: '' } : t));
+        } catch (error) {
+            console.error('Error deleting team member:', error);
+        }
     }, []);
 
     // Kanban Columns
-    const handleAddColumn = useCallback((name) => {
-        const newCol = { id: `col-${Date.now()}`, name };
-        setColumns(prev => [...prev, newCol]);
-        notify('Колонку додано');
+    const handleAddColumn = useCallback(async (name) => {
+        try {
+            const newCol = { id: `col-${Date.now()}`, name, order_index: columns.length };
+            const { error } = await supabase.from('columns').insert(newCol);
+            if (error) throw error;
+            setColumns(prev => [...prev, newCol]);
+            notify('Колонку додано');
+        } catch (error) {
+            console.error('Error adding column:', error);
+        }
+    }, [columns.length, notify]);
+
+    const handleDeleteColumn = useCallback(async (id) => {
+        try {
+            const { error } = await supabase.from('columns').delete().eq('id', id);
+            if (error) throw error;
+            setColumns(prev => prev.filter(c => c.id !== id));
+            notify('Колонку видалено', 'warning');
+        } catch (error) {
+            console.error('Error deleting column:', error);
+        }
     }, [notify]);
 
-    const handleDeleteColumn = useCallback((id) => {
-        setColumns(prev => prev.filter(c => c.id !== id));
-        notify('Колонку видалено', 'warning');
+    const handleUpdateColumn = useCallback(async (id, name) => {
+        try {
+            const { error } = await supabase.from('columns').update({ name }).eq('id', id);
+            if (error) throw error;
+            setColumns(prev => prev.map(c => c.id === id ? { ...c, name } : c));
+            notify('Розділ оновлено');
+        } catch (error) {
+            console.error('Error updating column:', error);
+        }
     }, [notify]);
 
-    const handleUpdateColumn = useCallback((id, name) => {
-        setColumns(prev => prev.map(c => c.id === id ? { ...c, name } : c));
-        notify('Розділ оновлено');
-    }, [notify]);
-
-    const handleMoveColumn = useCallback((fromIndex, toIndex) => {
+    const handleMoveColumn = useCallback(async (fromIndex, toIndex) => {
         setColumns(prev => {
             const result = Array.from(prev);
             const [removed] = result.splice(fromIndex, 1);
             result.splice(toIndex, 0, removed);
+            
+            // Update order_index for all columns in Supabase
+            result.forEach(async (col, index) => {
+                await supabase.from('columns').update({ order_index: index }).eq('id', col.id);
+            });
+            
             return result;
         });
     }, []);

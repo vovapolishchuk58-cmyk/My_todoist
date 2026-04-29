@@ -129,7 +129,7 @@ const KanbanBoard = ({
             className="todoist-kanban flex gap-6 p-6 min-h-full items-start overflow-x-auto scrollbar-hide"
         >
             {columns.map(column => {
-                const columnTasks = (tasks || []).filter(t => t && t.column === column.id);
+                const columnTasks = (tasks || []).filter(t => t && t.column_id === column.id);
 
                 return (
                     <div
@@ -322,7 +322,7 @@ const KanbanBoard = ({
                                                 id: taskId,
                                                 ...taskData,
                                                 dueDate: taskData.dueDate || null,
-                                                column: column.id,
+                                                column_id: column.id,
                                                 completed: false,
                                                 project: 'inbox'
                                             });
