@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Todoist Clone - Rebuilt</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <script>
+        window.onerror = function (msg, url, lineNo, columnNo, error) {
+            var message = [
+                'Message: ' + msg,
+                'URL: ' + url,
+                'Line: ' + lineNo,
+                'Column: ' + columnNo,
+                'Error object: ' + JSON.stringify(error)
+            ].join(' - ');
+            console.error('GLOBAL ERROR:', message);
+            var div = document.createElement('div');
+            div.style.position = 'fixed';
+            div.style.top = '0';
+            div.style.left = '0';
+            div.style.width = '100%';
+            div.style.background = 'red';
+            div.style.color = 'white';
+            div.style.padding = '10px';
+            div.style.zIndex = '9999';
+            div.innerText = 'CRITICAL ERROR: ' + msg;
+            document.body.appendChild(div);
+            return false;
+        };
+    </script>
+</head>
+
+<body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+</body>
+
+</html>
