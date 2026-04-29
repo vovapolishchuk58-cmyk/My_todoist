@@ -2,6 +2,7 @@ import * as ReactModule from 'react';
 const React = ReactModule.default || ReactModule;
 const { useState, useEffect, useCallback, useMemo } = React;
 import { supabase } from './lib/supabase';
+import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import KanbanBoard from './components/KanbanBoard';
 import { TaskModal, TaskDetailModal, ProjectModal, LabelModal, TeamModal, DeleteConfirmationModal } from './components/Modals';
@@ -26,9 +27,8 @@ const App = () => {
         { id: 'user2', name: 'Олена Петрова', email: 'olena@example.com', avatar: 'ОП' }
     ];
 
-    const initialColumns = [];
-
     // --- State Management ---
+    const [session, setSession] = useState(null);
     const [tasks, setTasks] = useState([]);
     const [projects, setProjects] = useState(initialProjects);
     const [labels, setLabels] = useState(initialLabels);
@@ -48,7 +48,7 @@ const App = () => {
                 setTasks(prev => prev.map(t => t.column_id === 'done' ? { ...t, column_id: columns[0].id } : t));
             }
         }
-    }, []);
+    }, [columns, tasks]);
 
     const [currentFilter, setCurrentFilter] = useState('all');
     const [selectedProject, setSelectedProject] = useState('all');
@@ -103,15 +103,32 @@ const App = () => {
     }, [notify]);
 
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setSession(session);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        if (session) {
+            fetchData();
+        } else {
+            setLoading(false);
+        }
+    }, [session, fetchData]);
 
     // --- Desktop Notification Permission ---
     useEffect(() => {
+        if (!session) return;
         if ('Notification' in window && window.Notification.permission === 'default') {
             window.Notification.requestPermission();
         }
-    }, []);
+    }, [session]);
 
     // --- Periodic Due Date Check ---
     useEffect(() => {
@@ -442,6 +459,33 @@ const App = () => {
         }
     }, [tasks, selectedProject, currentFilter, showCompleted]);
 
+    const handleLogout = async () => {
+        await supabase.auth.signOut();
+        setSession(null);
+        setTasks([]);
+        setProjects([]);
+        setLabels([]);
+        setTeamMembers([]);
+        setColumns([]);
+        setSubtasks([]);
+        setComments([]);
+    };
+
+    if (!session && !loading) {
+        return <Auth />;
+    }
+
+    if (loading) {
+        return (
+            <div className="h-screen flex items-center justify-center bg-[#fcfaf8]">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-[#de4c4a] border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-gray-400 font-medium">Завантаження...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="todoist-app flex h-screen overflow-hidden bg-white">
             {notification && <ToastNotification {...notification} onClose={() => setNotification(null)} />}
@@ -489,6 +533,8 @@ const App = () => {
                 onEditMember={(m) => setActiveModal({ type: 'team', data: m })}
                 onDeleteMember={handleTeamDelete}
                 tasks={tasks}
+                onLogout={handleLogout}
+                user={session?.user}
             />
 
             <main className={`todoist-main flex-1 transition-all duration-300 ${sidebarOpen ? 'pl-[280px]' : 'pl-0'}`}>

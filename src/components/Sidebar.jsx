@@ -15,7 +15,8 @@ import {
     Trash2,
     Settings,
     Tag,
-    CheckCircle2
+    CheckCircle2,
+    LogOut
 } from 'lucide-react';
 
 const Sidebar = ({
@@ -36,7 +37,9 @@ const Sidebar = ({
     onAddMember,
     onEditMember,
     onDeleteMember,
-    tasks = []
+    tasks = [],
+    onLogout,
+    user
 }) => {
     const filters = [
         { id: 'all', name: 'Всі задачі', icon: <Inbox size={18} />, color: 'text-blue-500' },
@@ -76,9 +79,11 @@ const Sidebar = ({
             <div className="flex flex-col h-full bg-[#fcfaf8]">
                 {/* User Header */}
                 <div className="p-4 flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 px-2 py-1 hover:bg-sidebar-hover rounded-md transition-colors cursor-pointer flex-1">
-                        <div className="w-7 h-7 bg-red-500 rounded-lg flex items-center justify-center text-white text-[10px] font-bold">АК</div>
-                        <span className="text-sm font-bold text-[#202020]">Artem Kravchenko</span>
+                    <div className="flex items-center gap-2 px-2 py-1 hover:bg-sidebar-hover rounded-md transition-colors cursor-pointer flex-1 overflow-hidden">
+                        <div className="w-7 h-7 bg-red-500 rounded-lg flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                            {user?.email?.substring(0, 2).toUpperCase() || 'US'}
+                        </div>
+                        <span className="text-sm font-bold text-[#202020] truncate">{user?.email || 'Користувач'}</span>
                     </div>
                 </div>
 
@@ -174,10 +179,17 @@ const Sidebar = ({
                     </div>
                 </div>
 
-                <div className="mt-auto p-4 border-t border-sidebar-border">
+                <div className="mt-auto p-4 border-t border-sidebar-border space-y-1">
                     <button className="flex items-center gap-3 w-full px-3 py-2 text-sidebar-text-secondary hover:bg-sidebar-hover rounded-md text-sm transition-colors">
                         <Settings size={18} />
                         Налаштування
+                    </button>
+                    <button 
+                        onClick={onLogout}
+                        className="flex items-center gap-3 w-full px-3 py-2 text-red-500 hover:bg-red-50 rounded-md text-sm font-bold transition-colors"
+                    >
+                        <LogOut size={18} />
+                        Вийти
                     </button>
                 </div>
             </div>
