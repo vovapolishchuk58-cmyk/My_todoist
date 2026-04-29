@@ -1,3 +1,4 @@
+// Triggering Vercel deployment
 import * as ReactModule from 'react';
 const React = ReactModule.default || ReactModule;
 import * as ReactDOMModule from 'react-dom/client';
